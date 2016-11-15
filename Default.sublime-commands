@@ -1,0 +1,61 @@
+[
+	{
+		"caption": "Hg: Incoming",
+		"command": "hg_incoming"
+	},
+	{
+		"caption": "Hg: Outgoing",
+		"command": "hg_outgoing"
+	},
+	{
+		"caption": "Hg: Pull",
+		"command": "hg_pull"
+	},
+	{
+		"caption": "Hg: Pull & Update",
+		"command": "hg_pull",
+		"args": {"update": true}
+	},
+	{
+		"caption": "Hg: Pull & Rebase",
+		"command": "hg_pull",
+		"args": {"rebase": true}
+	},
+	{
+		"caption": "Hg: Push",
+		"command": "hg_push"
+	},
+	{
+		"caption": "Hg: Update",
+		"command": "hg_update"
+	},
+	{
+		"caption": "Hg: Merge",
+		"command": "hg_merge"
+	},
+	{
+		"caption": "Hg: Status",
+		"command": "hg_status"
+	},
+	{
+		"caption": "Hg: Diff",
+		"command": "hg_diff"
+	},
+	{
+		"caption": "Hg: Addremove",
+		"command": "hg_addremove"
+	},
+	{
+		"caption": "Hg: Commit",
+		"command": "hg_commit"
+	},
+	{
+		"caption": "Hg: Commit close branch",
+		"command": "hg_commit",
+		"args": {"close_branch": true}
+	},
+	{
+		"caption": "Hg: Resolve all",
+		"command": "hg_resolve_all"
+	}
+]
