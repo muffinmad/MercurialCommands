@@ -18,6 +18,7 @@ class HgServer(object):
         super(HgServer, self).__init__()
         self.server = hglib.open(folder)
         self._summary = None
+        self.commit_history = []
 
     def close(self):
         self.server.close()
@@ -29,6 +30,13 @@ class HgServer(object):
     @summary.setter
     def summary(self, value):
         self._summary = value
+
+    def add_commit_message(self, message):
+        if message in self.commit_history:
+            self.commit_history.remove(message)
+        self.commit_history.append(message)
+        while len(self.commit_history) > 20:
+            self.commit_history.pop(0)
 
 
 def stop_all_servers():
@@ -358,19 +366,24 @@ class HgCommitCommand(HgWindowCommand):
         if err:
             self.panel(err)
             return
-        global commit_history
-        output = ['closed' if close_branch else '']
+        output = ['']
         output.extend([
             '# ----------',
             '# Enter the commit message. Everything below this paragraph is ignored.',
             '# Empty message aborts the commit.',
             '# Close this window to accept your message.'
         ])
-        for r in res:
-            r = list(map(lambda x: str(x, self.encoding) if type(x) == bytes else x, r))
-            output.append('#\t{}\t{}'.format(r[0], r[1]))
+        if res:
+            output.append('#')
+            output.append('# Files to commit:')
+            for r in res:
+                r = list(map(lambda x: str(x, self.encoding) if type(x) == bytes else x, r))
+                output.append('#\t{}\t{}'.format(r[0], r[1]))
+        commit_history = srv.commit_history
         if commit_history:
-            output.append('# commit messages history:')
+            output.append('#')
+            output.append('# Commit messages history:')
+            output.append('#')
             for c in commit_history:
                 output.append('# {}'.format(c))
         v = self.scratch('\n'.join(output), title='Hg: Commit close branch' if close_branch else 'Hg: Commit')
@@ -383,11 +396,9 @@ class HgCommitCommand(HgWindowCommand):
             return
         message = message.split('\n# ----------')[0].strip()
         if not message:
-            self.panel('No commit message')
+            self.panel('No commit message', clear=True)
             return
-        global commit_history
-        commit_history.insert(0, message)
-        commit_history = commit_history[:20]
+        srv.add_commit_message(message)
         self.run_hg_function(srv, 'commit', message=message.encode(self.encoding), closebranch=close_branch)
         srv.summary = None
 
