@@ -203,9 +203,9 @@ class HgBranchStatusCommand(HgTextCommand):
             return
         s = str(summary[b'branch'], srv.encoding.decode())
         if not summary[b'commit']:
-            s += '!'
+            s += ' ‼'
         if summary[b'update']:
-            s += '^'
+            s += ' ^'
         self.view.set_status('Hgstate', str(s))
 
 
@@ -241,7 +241,7 @@ class HgIncomingCommand(HgWindowCommand):
             if err:
                 self.panel(err)
             else:
-                self.panel('no incoming')
+                self.panel('no ' + self.hg_command)
 
 
 class HgOutgoingCommand(HgIncomingCommand):
@@ -352,7 +352,7 @@ class HgCommitCommand(HgWindowCommand):
             self.panel(err)
             return
         global commit_history
-        output = ['closed' if close_branch else commit_history[0] if commit_history else '']
+        output = ['closed' if close_branch else '']
         output.extend([
             '# ----------',
             '# Enter the commit message. Everything below this paragraph is ignored.',
@@ -363,10 +363,9 @@ class HgCommitCommand(HgWindowCommand):
         for r in res:
             r = list(map(lambda x: str(x, e) if type(x) == bytes else x, r))
             output.append('#\t{}\t{}'.format(r[0], r[1]))
-        ch = commit_history[1:]
-        if ch:
+        if commit_history:
             output.append('# commit messages history:')
-            for c in ch:
+            for c in commit_history:
                 output.append('# {}'.format(c))
         v = self.scratch('\n'.join(output), title='Hg: Commit close branch' if close_branch else 'Hg: Commit')
         v.set_read_only(False)
