@@ -1,5 +1,7 @@
 import sys
 import os
+from threading import Thread, Lock
+from functools import partial
 
 import sublime
 import sublime_plugin
@@ -78,37 +80,122 @@ def plugin_unloaded():
     stop_all_servers()
 
 
+def main_thread(callback, *args, **kwargs):
+    sublime.set_timeout(partial(callback, *args, **kwargs), 0)
+
+
+class HgCommandThread(Thread):
+    command_lock = Lock()
+    prompt_lock = Lock()
+
+    def __init__(self, srv, func, on_done, on_output, on_prompt, *args, **kwargs):
+        super(HgCommandThread, self).__init__()
+        self.srv = srv
+        self.func = func
+        self.on_done = on_done
+        self.on_output = on_output
+        self.on_prompt = on_prompt
+        self.args = args
+        self.kwargs = kwargs
+
+    def _prompt(self, p):
+        if not self.on_prompt:
+            return b''
+        self.answer = b''
+        self.prompt_lock.acquire()
+        main_thread(self.on_prompt, p)
+        self.prompt_lock.acquire()
+        try:
+            return self.answer
+        finally:
+            self.prompt_lock.release()
+
+    def provide_answer(self, answer):
+        self.answer = answer
+        self.prompt_lock.release()
+
+    def _done(self, output=None, err=None):
+        if self.on_done:
+            main_thread(self.on_done, output, err)
+
+    def _output(self, output):
+        if self.on_output:
+            main_thread(self.on_output, output)
+
+    def run(self):
+        if not self.srv:
+            self._done()
+            return
+        output = None
+        err = None
+        self.command_lock.acquire()
+        try:
+            srv = self.srv.server
+            srv.setcbout(self._output)
+            srv.setcberr(self._output)
+            srv.setcbprompt(lambda size, x: self._prompt(x) + b'\n')
+            try:
+                output = getattr(srv, self.func)(*self.args, **self.kwargs)
+            except hglib.error.CommandError as ex:
+                encoding = srv.encoding.decode()
+                err = '\n'.join(filter(bool, [
+                    str(ex.out.rstrip(), encoding),
+                    str(ex.err.rstrip(), encoding)
+                ]))
+            except Exception as e:
+                err = str(e)
+        finally:
+            self.command_lock.release()
+        self._done(output, err)
+
+
 class HgCommand(object):
 
     def _cbout(self, data):
         self.panel(str(data, self.encoding))
 
-    def _cbprompt(self, p):
-        res = sublime.yes_no_cancel_dialog(str(p, self.encoding), 'y', 'n')
-        if res == sublime.DIALOG_YES:
-            return b'y'
-        if res == sublime.DIALOG_NO:
-            return b'n'
-        return b''
+    def _on_input_done(self, answer):
+        self.panel('{}\n'.format(answer))
+        self.active_hg_command.provide_answer(answer.encode())
 
-    def run_hg_function(self, srv, func, log_output=True, *args, **kwargs):
-        err = None
-        self.srv = srv.server
-        self.srv.setcbout(self._cbout if log_output else None)
-        self.srv.setcberr(self._cbout if log_output else None)
-        self.srv.setcbprompt(lambda size, data: self._cbprompt(data) + b'\n')
+    def _on_input_cancel(self):
+        self.panel('\n')
+        self.active_hg_command.provide_answer(b'')
+
+    def _cbprompt(self, p):
+        prompt = ' '.join(str(p, self.encoding).split('\n')[-2:])
+        self.get_window().show_input_panel(prompt, '', self._on_input_done, None, self._on_input_cancel)
+
+    def _done(self, output, err):
+        pass
+
+    def _command_done(self, *args, **kwargs):
+        v = self.get_view()
+        if v:
+            v.erase_status('HgCommand')
+        self._done(*args, **kwargs)
+
+    def run_hg_function(self, func, log_output=True, *args, **kwargs):
+        self.srv = self.get_server()
+        if not self.srv:
+            self._done(None, None)
+            return
+        self.encoding = self.srv.server.encoding.decode()
         if log_output:
             self.panel('', clear=True)
-        try:
-            return getattr(self.srv, func)(*args, **kwargs), None
-        except hglib.error.CommandError as ex:
-            err = '\n'.join(filter(bool, [
-                str(ex.out.rstrip(), self.encoding),
-                str(ex.err.rstrip(), self.encoding)
-            ]))
-        except Exception as e:
-            err = str(e)
-        return None, err
+        v = self.get_view()
+        if v:
+            v.set_status('HgCommand', 'Hg: ' + func)
+        self.active_hg_command = HgCommandThread(
+            self.srv,
+            func,
+            self._command_done,
+            self._cbout if log_output else None,
+            self._cbprompt,
+            *args,
+            **kwargs
+        )
+        self.active_hg_command.start()
 
     def _output_to_view(self, view, output, clear=False, syntax=None, **kwargs):
         if syntax:
@@ -120,8 +207,7 @@ class HgCommand(object):
         view.run_command('hg_scratch_output', args)
 
     def panel(self, output, clear=False, **kwargs):
-        if not hasattr(self, 'output_view'):
-            self.output_view = self.get_window().get_output_panel('hg')
+        self.output_view = self.get_window().get_output_panel('hg')
         self.output_view.set_read_only(False)
         self._output_to_view(self.output_view, output, clear=clear, **kwargs)
         self.output_view.set_read_only(True)
@@ -173,10 +259,7 @@ class HgTextCommand(HgCommand, sublime_plugin.TextCommand):
         d = hg_root(os.path.realpath(os.path.dirname(fn)))
 
         if d:
-            result = _get_server(d)
-            if result:
-                self.encoding = result.server.encoding.decode()
-            return result
+            return _get_server(d)
         return None
 
 
@@ -191,35 +274,42 @@ class HgWindowCommand(HgCommand, sublime_plugin.WindowCommand):
     def get_server(self):
         d = self.window.extract_variables().get('folder')
         if d and is_hg_root(d):
-            result = _get_server(d)
-            if result:
-                self.encoding = result.server.encoding.decode()
-            return result
+            return _get_server(d)
         return None
 
 
 class HgBranchStatusCommand(HgTextCommand):
 
+    def _done(self, output, err):
+        if not output:
+            if err:
+                self.panel(err)
+            self.view.erase_status('HgState')
+            return
+        self.srv.summary = {
+            'branch': str(output[b'branch'], self.encoding),
+            'commit': output[b'commit'],
+            'update': output[b'update']
+        }
+        self._set_status(self.srv)
+
+    def _set_status(self, srv):
+        s = srv.summary['branch']
+        if not srv.summary['commit']:
+            s += ' ‼'
+        if srv.summary['update']:
+            s += ' ^'
+        self.view.set_status('HgState', str(s))
+
     def run(self, edit, force=False):
         srv = self.get_server()
         if not srv:
-            self.view.erase_status('Hgstate')
+            self.view.erase_status('HgState')
             return
-        if not srv.summary or force:
-            summary, err = self.run_hg_function(srv, 'summary', log_output=False)
-            if not summary:
-                if err:
-                    self.panel(err)
-                self.view.erase_status('Hgstate')
-                return
-            srv.summary = summary
-        summary = srv.summary
-        s = str(summary[b'branch'], self.encoding)
-        if not summary[b'commit']:
-            s += ' ‼'
-        if summary[b'update']:
-            s += ' ^'
-        self.view.set_status('Hgstate', str(s))
+        if force or not srv.summary:
+            self.run_hg_function('summary', log_output=False)
+        else:
+            self._set_status(srv)
 
 
 class HgBranchStatusListener(sublime_plugin.EventListener):
@@ -234,138 +324,136 @@ class HgBranchStatusListener(sublime_plugin.EventListener):
 class HgIncomingCommand(HgWindowCommand):
 
     hg_command = 'incoming'
+    no_changes_text = 'No incoming'
+    output_view_title = 'Hg: Incoming'
+
+    def _done(self, data, err):
+        if data:
+            output = []
+            for r in data:
+                r = list(map(lambda x: str(x, self.encoding) if type(x) == bytes else x, r))
+                output.append('{}\t{}:{}\t{}'.format(r[3], r[0], r[1][:12], r[-1]))
+                output.append(r[4])
+                output.append(r[5])
+                output.append('')
+            self.scratch('\n'.join(output), title=self.output_view_title)
+            self.window.destroy_output_panel('hg')
+        else:
+            self.panel(err if err else self.no_changes_text)
 
     def run(self):
-        srv = self.get_server()
-        if not srv:
-            return
-        res, err = self.run_hg_function(srv, self.hg_command, log_output=False)
-        output = []
-        for r in res:
-            r = list(map(lambda x: str(x, self.encoding) if type(x) == bytes else x, r))
-            output.append('{}\t{}:{}\t{}'.format(r[3], r[0], r[1][:12], r[-1]))
-            output.append(r[4])
-            output.append(r[5])
-            output.append('')
-        if output:
-            self.scratch('\n'.join(output), title='Hg: Incoming')
-        else:
-            if err:
-                self.panel(err)
-            else:
-                self.panel('no ' + self.hg_command)
+        self.run_hg_function(self.hg_command)
 
 
 class HgOutgoingCommand(HgIncomingCommand):
 
     hg_command = 'outgoing'
+    no_changes_text = 'No outgoing'
+    output_view_title = 'Hg: Outgoing'
 
 
 class HgPullCommand(HgWindowCommand):
 
+    def _done(self, data, err):
+        self.srv.summary = None
+        v = self.window.active_view()
+        if v:
+            v.run_command('hg_branch_status')
+
     def run(self, update=False, rebase=False):
-        srv = self.get_server()
-        if not srv:
-            return
         if rebase:
             update = False
         if update:
             tool = None
         else:
             tool = 'internal:merge'
-        self.run_hg_function(srv, 'pull', update=update, rebase=rebase, tool=tool)
-        srv.summary = None
+        self.run_hg_function('pull', update=update, rebase=rebase, tool=tool)
 
 
 class HgPushCommand(HgWindowCommand):
 
     def run(self, newbranch=False):
-        srv = self.get_server()
-        if not srv:
-            return
-        self.run_hg_function(srv, 'push', newbranch=newbranch)
+        self.run_hg_function('push', newbranch=newbranch)
 
 
 class HgUpdateCommand(HgWindowCommand):
 
+    def _done(self, data, err):
+        self.srv.summary = None
+        v = self.window.active_view()
+        if v:
+            v.run_command('hg_branch_status')
+
     def run(self):
-        srv = self.get_server()
-        if not srv:
-            return
-        self.run_hg_function(srv, 'update')
-        srv.summary = None
+        self.run_hg_function('update')
 
 
 class HgMergeCommand(HgWindowCommand):
 
+    def _done(self, data, err):
+        self.srv.summary = None
+        v = self.window.active_view()
+        if v:
+            v.run_command('hg_branch_status')
+
     def run(self):
-        srv = self.get_server()
-        if not srv:
-            return
-        self.run_hg_function(srv, 'merge', cb=self._cbprompt)
-        srv.summary = None
+        self.run_hg_function('merge')
 
 
 class HgStatusCommand(HgWindowCommand):
 
-    def run(self):
-        srv = self.get_server()
-        if not srv:
-            return
-        res, err = self.run_hg_function(srv, 'status', log_output=False)
-        if res:
+    def _done(self, data, err):
+        if data:
             output = []
-            for r in res:
+            for r in data:
                 r = list(map(lambda x: str(x, self.encoding) if type(x) == bytes else x, r))
                 output.append('{}\t{}'.format(r[0], r[1]))
-            if output:
-                self.scratch('\n'.join(output), title='Hg: Status')
+            self.scratch('\n'.join(output), title='Hg: Status')
         else:
-            if err:
-                self.panel(err)
-            else:
-                self.panel('no')
+            self.panel(err if err else 'No changes')
+
+    def run(self):
+        self.run_hg_function('status', log_output=False)
 
 
 class HgDiffCommand(HgWindowCommand):
 
-    def run(self):
-        srv = self.get_server()
-        if not srv:
-            return
-        res, err = self.run_hg_function(srv, 'diff', log_output=False)
-        if res:
-            self.scratch(str(res, self.encoding), title='Hg: Diff', syntax='Packages/Diff/Diff.tmLanguage')
+    def _done(self, data, err):
+        if data:
+            self.scratch(str(data, self.encoding), title='Hg: Diff', syntax='Packages/Diff/Diff.tmLanguage')
         else:
-            if err:
-                self.panel(err)
-            else:
-                self.panel('no')
+            self.panel(err if err else 'No changes')
+
+    def run(self):
+        self.run_hg_function('diff', log_output=False)
 
 
 class HgAddremoveCommand(HgWindowCommand):
 
+    def _done(self, data, err):
+        self.srv.summary = None
+        v = self.window.active_view()
+        if v:
+            v.run_command('hg_branch_status')
+
     def run(self):
-        srv = self.get_server()
-        if not srv:
-            return
-        self.run_hg_function(srv, 'addremove')
-        srv.summary = None
-
-
-commit_history = []
+        self.run_hg_function('addremove')
 
 
 class HgCommitCommand(HgWindowCommand):
 
-    def run(self, close_branch=False):
-        srv = self.get_server()
-        if not srv:
+    def _done(self, data, err):
+        if not self.is_status_command:
+            self.srv.summary = None
+            v = self.window.active_view()
+            if v:
+                v.run_command('hg_branch_status')
             return
-        res, err = self.run_hg_function(srv, 'status', log_output=False)
-        if err:
-            self.panel(err)
+
+        if not data:
+            self.panel(err if err else 'No changes')
             return
+
         output = ['']
         output.extend([
             '# ----------',
@@ -373,34 +461,36 @@ class HgCommitCommand(HgWindowCommand):
             '# Empty message aborts the commit.',
             '# Close this window to accept your message.'
         ])
-        if res:
-            output.append('#')
-            output.append('# Files to commit:')
-            for r in res:
-                r = list(map(lambda x: str(x, self.encoding) if type(x) == bytes else x, r))
-                output.append('#\t{}\t{}'.format(r[0], r[1]))
-        commit_history = srv.commit_history
+        output.append('#')
+        output.append('# Files to commit:')
+        for r in data:
+            r = list(map(lambda x: str(x, self.encoding) if type(x) == bytes else x, r))
+            output.append('#\t{}\t{}'.format(r[0], r[1]))
+
+        commit_history = self.srv.commit_history
         if commit_history:
             output.append('#')
             output.append('# Commit messages history:')
             output.append('#')
             for c in commit_history:
                 output.append('# {}'.format(c))
-        v = self.scratch('\n'.join(output), title='Hg: Commit close branch' if close_branch else 'Hg: Commit')
+        v = self.scratch('\n'.join(output), title='Hg: Commit close branch' if self.close_branch else 'Hg: Commit')
         v.set_read_only(False)
         HgCommitCommand.active_message = self
 
-    def on_message_done(self, message, close_branch):
-        srv = self.get_server()
-        if not srv:
-            return
+    def run(self, close_branch=False):
+        self.is_status_command = True
+        self.close_branch = close_branch
+        self.run_hg_function('status', log_output=False)
+
+    def on_message_done(self, message):
+        self.is_status_command = False
         message = message.split('\n# ----------')[0].strip()
         if not message:
             self.panel('No commit message', clear=True)
             return
-        srv.add_commit_message(message)
-        self.run_hg_function(srv, 'commit', message=message.encode(self.encoding), closebranch=close_branch)
-        srv.summary = None
+        self.srv.add_commit_message(message)
+        self.run_hg_function('commit', message=message.encode(self.encoding), closebranch=self.close_branch)
 
 
 class HgCommitMessageListener(sublime_plugin.EventListener):
@@ -411,17 +501,24 @@ class HgCommitMessageListener(sublime_plugin.EventListener):
         command = HgCommitCommand.active_message
         if not command:
             return
-        close_branch = view.name() == 'Hg: Commit close branch'
         region = sublime.Region(0, view.size())
         message = view.substr(region)
-        command.on_message_done(message, close_branch)
+        command.on_message_done(message)
 
 
 class HgResolveAllCommand(HgWindowCommand):
 
+    def _done(self, data, err):
+        self.srv.summary = None
+        v = self.window.active_view()
+        if v:
+            v.run_command('hg_branch_status')
+
     def run(self):
-        srv = self.get_server()
-        if not srv:
-            return
-        self.run_hg_function(srv, 'resolve', all=True)
-        srv.summary = None
+        self.run_hg_function('resolve', all=True)
+
+
+class HgRebaseCommand(HgWindowCommand):
+
+    def run(self, continue_rebase=None, abort_rebase=None):
+        self.run_hg_function('rebase', continue_rebase=continue_rebase, abort_rebase=abort_rebase)

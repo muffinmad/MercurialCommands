@@ -57,5 +57,23 @@
 	{
 		"caption": "Hg: Resolve all",
 		"command": "hg_resolve_all"
+	},
+	{
+		"caption": "Hg: Rebase",
+		"command": "hg_rebase"
+	},
+	{
+		"caption": "Hg: Continue rebase",
+		"command": "hg_rebase",
+		"args": {
+			"continue_rebase": true
+		}
+	},
+	{
+		"caption": "Hg: Abort rebase",
+		"command": "hg_rebase",
+		"args": {
+			"abort_rebase": true
+		}
 	}
 ]

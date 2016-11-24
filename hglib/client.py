@@ -1325,6 +1325,14 @@ class hgclient(object):
 
         return bool(eh)
 
+    def rebase(self, continue_rebase=None, abort_rebase=None):
+        if continue_rebase and abort_rebase:
+            raise ValueError("cannot specify both continue and abort")
+        args = cmdbuilder(b('rebase'), c=continue_rebase, a=abort_rebase)
+        eh = util.reterrorhandler(args)
+        self.rawcommand(args, eh=eh)
+        return bool(eh)
+
     def remove(self, files, after=False, force=False, include=None,
                exclude=None):
         """Schedule the indicated files for removal from the repository. This
