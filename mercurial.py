@@ -207,7 +207,8 @@ class HgCommand(object):
         view.run_command('hg_scratch_output', args)
 
     def panel(self, output, clear=False, **kwargs):
-        self.output_view = self.get_window().get_output_panel('hg')
+        if not hasattr(self, 'output_view') or not self.output_view:
+            self.output_view = self.get_window().get_output_panel('hg')
         self.output_view.set_read_only(False)
         self._output_to_view(self.output_view, output, clear=clear, **kwargs)
         self.output_view.set_read_only(True)
@@ -338,6 +339,7 @@ class HgIncomingCommand(HgWindowCommand):
                 output.append('')
             self.scratch('\n'.join(output), title=self.output_view_title)
             self.window.destroy_output_panel('hg')
+            self.output_view = None
         else:
             self.panel(err if err else self.no_changes_text)
 
