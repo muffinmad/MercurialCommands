@@ -234,6 +234,12 @@ class HgCommand(object):
         self.get_window().focus_view(v)
         return v
 
+    def reset_summary(self):
+        self.srv.summary = None
+        v = self.get_view()
+        if v:
+            v.run_command('hg_branch_status')
+
 
 class HgScratchOutputCommand(sublime_plugin.TextCommand):
 
@@ -358,10 +364,7 @@ class HgOutgoingCommand(HgIncomingCommand):
 class HgPullCommand(HgWindowCommand):
 
     def _done(self, data, err):
-        self.srv.summary = None
-        v = self.window.active_view()
-        if v:
-            v.run_command('hg_branch_status')
+        self.reset_summary()
 
     def run(self, update=False, rebase=False):
         if rebase:
@@ -382,22 +385,62 @@ class HgPushCommand(HgWindowCommand):
 class HgUpdateCommand(HgWindowCommand):
 
     def _done(self, data, err):
-        self.srv.summary = None
-        v = self.window.active_view()
-        if v:
-            v.run_command('hg_branch_status')
+        self.reset_summary()
 
-    def run(self):
-        self.run_hg_function('update')
+    def run(self, clean=False, rev=None):
+        if clean:
+            if not sublime.ok_cancel_dialog('Discard uncommited changes?'):
+                return
+        self.run_hg_function('update', clean=clean, rev=rev)
+
+
+class HgUpdateBranchCommand(HgWindowCommand):
+
+    def _done(self, data, err):
+        if data:
+            self.branches = list(map(lambda x: str(x[0], self.encoding), data))
+            try:
+                idx = self.branches.index(self.current_branch)
+            except ValueError:
+                idx = -1
+            self.get_window().show_quick_panel(
+                self.branches,
+                self.select_done,
+                sublime.KEEP_OPEN_ON_FOCUS_LOST,
+                idx,
+                None
+            )
+        else:
+            self.panel(err if err else 'No branches')
+
+    def select_done(self, idx):
+        if idx > -1:
+            self.get_window().run_command('hg_update', {'rev': self.branches[idx]})
+
+    def on_branch_done(self, data, err):
+        if data:
+            self.current_branch = str(data, self.encoding)
+        else:
+            self.panel(err if err else 'No current branch')
+            self.current_branch = None
+        self.run_hg_function('branches', log_output=False, closed=self.closed)
+
+    def run(self, closed=False):
+        srv = self.get_server()
+        if not srv:
+            return
+        self.closed = closed
+        if not srv.summary:
+            self.run_hg_function('branch', log_output=False, on_done=self._on_branch_done)
+        else:
+            self.current_branch = srv.summary['branch']
+            self.run_hg_function('branches', log_output=False, closed=closed)
 
 
 class HgMergeCommand(HgWindowCommand):
 
     def _done(self, data, err):
-        self.srv.summary = None
-        v = self.window.active_view()
-        if v:
-            v.run_command('hg_branch_status')
+        self.reset_summary()
 
     def run(self):
         self.run_hg_function('merge')
@@ -434,22 +477,60 @@ class HgDiffCommand(HgWindowCommand):
 class HgAddremoveCommand(HgWindowCommand):
 
     def _done(self, data, err):
-        self.srv.summary = None
-        v = self.window.active_view()
-        if v:
-            v.run_command('hg_branch_status')
+        self.reset_summary()
 
     def run(self):
         self.run_hg_function('addremove')
 
 
+class HgBranchCommand(HgWindowCommand):
+
+    def _on_branch_done(self, output, err):
+        if output:
+            self.ask_branch_name(str(output, self.encoding))
+        else:
+            self.panel(err if err else 'No current branch')
+
+    def _on_input_cancel(self):
+        self.reset_summary()
+
+    def _on_input_done(self, answer):
+        self.run_hg_function('branch', name=answer.encode())
+
+    def _done(self, output, err):
+        self.reset_summary()
+
+    def ask_branch_name(self, current_branch):
+        self.get_window().show_input_panel(
+            'Branch name',
+            current_branch,
+            self._on_input_done,
+            None,
+            self._on_input_cancel)
+
+    def run(self):
+        srv = self.get_server()
+        if not srv:
+            return
+        if not srv.summary:
+            self.run_hg_function('branch', log_output=False, on_done=self._on_branch_done)
+        else:
+            self.ask_branch_name(srv.summary['branch'])
+
+
+class HgBranchCleanCommand(HgWindowCommand):
+
+    def _done(self, data, err):
+        self.reset_summary()
+
+    def run(self):
+        self.run_hg_function('branch', clean=True)
+
+
 class HgCommitCommand(HgWindowCommand):
 
     def _done(self, data, err):
-        self.srv.summary = None
-        v = self.window.active_view()
-        if v:
-            v.run_command('hg_branch_status')
+        self.reset_summary()
 
     def _on_status_done(self, data, err):
         if not data:
@@ -509,10 +590,7 @@ class HgCommitMessageListener(sublime_plugin.EventListener):
 class HgResolveAllCommand(HgWindowCommand):
 
     def _done(self, data, err):
-        self.srv.summary = None
-        v = self.window.active_view()
-        if v:
-            v.run_command('hg_branch_status')
+        self.reset_summary()
 
     def run(self):
         self.run_hg_function('resolve', all=True)

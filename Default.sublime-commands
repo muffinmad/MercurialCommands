@@ -30,6 +30,22 @@
 		"command": "hg_update"
 	},
 	{
+		"caption": "Hg: Update clean",
+		"command": "hg_update",
+		"args": {"clean": true}
+	},
+	{
+		"caption": "Hg: Update to branch",
+		"command": "hg_update_branch"
+	},
+	{
+		"caption": "Hg: Update to branch (with closed)",
+		"command": "hg_update_branch",
+		"args": {
+			"closed": true
+		}
+	},
+	{
 		"caption": "Hg: Merge",
 		"command": "hg_merge"
 	},
@@ -75,5 +91,13 @@
 		"args": {
 			"abort_rebase": true
 		}
+	},
+	{
+		"caption": "Hg: Branch",
+		"command": "hg_branch"
+	},
+	{
+		"caption": "Hg: Branch clean",
+		"command": "hg_branch_clean"
 	}
 ]
