@@ -173,9 +173,9 @@ class HgCommand(object):
         v = self.get_view()
         if v:
             v.erase_status('HgCommand')
-        self._done(*args, **kwargs)
+        self.on_done(*args, **kwargs)
 
-    def run_hg_function(self, func, log_output=True, *args, **kwargs):
+    def run_hg_function(self, func, on_done=None, log_output=True, *args, **kwargs):
         self.srv = self.get_server()
         if not self.srv:
             self._done(None, None)
@@ -186,6 +186,7 @@ class HgCommand(object):
         v = self.get_view()
         if v:
             v.set_status('HgCommand', 'Hg: ' + func)
+        self.on_done = on_done or self._done
         self.active_hg_command = HgCommandThread(
             self.srv,
             func,
@@ -445,13 +446,12 @@ class HgAddremoveCommand(HgWindowCommand):
 class HgCommitCommand(HgWindowCommand):
 
     def _done(self, data, err):
-        if not self.is_status_command:
-            self.srv.summary = None
-            v = self.window.active_view()
-            if v:
-                v.run_command('hg_branch_status')
-            return
+        self.srv.summary = None
+        v = self.window.active_view()
+        if v:
+            v.run_command('hg_branch_status')
 
+    def _on_status_done(self, data, err):
         if not data:
             self.panel(err if err else 'No changes')
             return
@@ -481,12 +481,10 @@ class HgCommitCommand(HgWindowCommand):
         HgCommitCommand.active_message = self
 
     def run(self, close_branch=False):
-        self.is_status_command = True
         self.close_branch = close_branch
-        self.run_hg_function('status', log_output=False)
+        self.run_hg_function('status', log_output=False, on_done=self._on_status_done)
 
     def on_message_done(self, message):
-        self.is_status_command = False
         message = message.split('\n# ----------')[0].strip()
         if not message:
             self.panel('No commit message', clear=True)
