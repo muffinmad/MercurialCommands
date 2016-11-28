@@ -441,9 +441,37 @@ class HgMergeCommand(HgWindowCommand):
 
     def _done(self, data, err):
         self.reset_summary()
+        message = 'merged'
+        if self.rev:
+            message += ' ' + self.rev
+        self.get_window().run_command('hg_commit', {'message': message})
+
+    def run(self, rev=None):
+        self.rev = rev
+        self.run_hg_function('merge', rev=rev)
+
+
+class HgMergeBranchCommand(HgWindowCommand):
+
+    def _done(self, data, err):
+        if data:
+            self.branches = list(map(lambda x: str(x[0], self.encoding), data))
+            self.get_window().show_quick_panel(
+                self.branches,
+                self.select_done,
+                sublime.KEEP_OPEN_ON_FOCUS_LOST,
+                -1,
+                None
+            )
+        else:
+            self.panel(err if err else 'No branches')
+
+    def select_done(self, idx):
+        if idx > -1:
+            self.get_window().run_command('hg_merge', {'rev': self.branches[idx]})
 
     def run(self):
-        self.run_hg_function('merge')
+        self.run_hg_function('branches', log_output=False)
 
 
 class HgStatusCommand(HgWindowCommand):
@@ -537,7 +565,7 @@ class HgCommitCommand(HgWindowCommand):
             self.panel(err if err else 'No changes')
             return
 
-        output = ['']
+        output = [self.message or '']
         output.extend([
             '# ----------',
             '# Enter the commit message. Everything below this paragraph is ignored.',
@@ -561,8 +589,9 @@ class HgCommitCommand(HgWindowCommand):
         v.set_read_only(False)
         HgCommitCommand.active_message = self
 
-    def run(self, close_branch=False):
+    def run(self, message=None, close_branch=False):
         self.close_branch = close_branch
+        self.message = message
         self.run_hg_function('status', log_output=False, on_done=self._on_status_done)
 
     def on_message_done(self, message):

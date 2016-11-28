@@ -50,6 +50,10 @@
 		"command": "hg_merge"
 	},
 	{
+		"caption": "Hg: Merge branch",
+		"command": "hg_merge_branch"
+	},
+	{
 		"caption": "Hg: Status",
 		"command": "hg_status"
 	},

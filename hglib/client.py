@@ -1139,7 +1139,7 @@ class hgclient(object):
         else:
             prompt = lambda size, output: cb(output) + b('\n')
 
-        self.rawcommand(args, prompt=prompt)
+        self.rawcommand(args)
 
     def move(self, source, dest, after=False, force=False, dryrun=False,
              include=None, exclude=None):
