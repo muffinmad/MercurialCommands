@@ -26,6 +26,13 @@
 		"command": "hg_push"
 	},
 	{
+		"caption": "Hg: Push new branch",
+		"command": "hg_push",
+		"args": {
+			"newbranch": true
+		}
+	},
+	{
 		"caption": "Hg: Update",
 		"command": "hg_update"
 	},
