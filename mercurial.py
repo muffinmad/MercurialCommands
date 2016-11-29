@@ -88,13 +88,14 @@ class HgCommandThread(Thread):
     command_lock = Lock()
     prompt_lock = Lock()
 
-    def __init__(self, srv, func, on_done, on_output, on_prompt, *args, **kwargs):
+    def __init__(self, srv, func, on_done, on_output, on_prompt, on_command, *args, **kwargs):
         super(HgCommandThread, self).__init__()
         self.srv = srv
         self.func = func
         self.on_done = on_done
         self.on_output = on_output
         self.on_prompt = on_prompt
+        self.on_command = on_command
         self.args = args
         self.kwargs = kwargs
 
@@ -130,6 +131,8 @@ class HgCommandThread(Thread):
         err = None
         self.command_lock.acquire()
         try:
+            if self.on_command:
+                main_thread(self.on_command, self.func)
             srv = self.srv.server
             srv.setcbout(self._output)
             srv.setcberr(self._output)
@@ -175,17 +178,20 @@ class HgCommand(object):
             v.erase_status('HgCommand')
         self.on_done(*args, **kwargs)
 
+    def _command(self, func):
+        if self.log_output:
+            self.panel('', clear=True)
+        v = self.get_view()
+        if v:
+            v.set_status('HgCommand', 'Hg: ' + func)
+
     def run_hg_function(self, func, on_done=None, log_output=True, *args, **kwargs):
         self.srv = self.get_server()
         if not self.srv:
             self._done(None, None)
             return
         self.encoding = self.srv.server.encoding.decode()
-        if log_output:
-            self.panel('', clear=True)
-        v = self.get_view()
-        if v:
-            v.set_status('HgCommand', 'Hg: ' + func)
+        self.log_output = log_output
         self.on_done = on_done or self._done
         self.active_hg_command = HgCommandThread(
             self.srv,
@@ -193,6 +199,7 @@ class HgCommand(object):
             self._command_done,
             self._cbout if log_output else None,
             self._cbprompt,
+            self._command,
             *args,
             **kwargs
         )
