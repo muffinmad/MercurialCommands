@@ -438,7 +438,7 @@ class HgUpdateBranchCommand(HgWindowCommand):
             return
         self.closed = closed
         if not srv.summary:
-            self.run_hg_function('branch', log_output=False, on_done=self._on_branch_done)
+            self.run_hg_function('branch', log_output=False, on_done=self.on_branch_done)
         else:
             self.current_branch = srv.summary['branch']
             self.run_hg_function('branches', log_output=False, closed=closed)
@@ -568,7 +568,7 @@ class HgCommitCommand(HgWindowCommand):
         self.reset_summary()
 
     def _on_status_done(self, data, err):
-        if not data:
+        if not data and not self.close_branch:
             self.panel(err if err else 'No changes')
             return
 
