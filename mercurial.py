@@ -88,7 +88,7 @@ class HgCommandThread(Thread):
     command_lock = Lock()
     prompt_lock = Lock()
 
-    def __init__(self, srv, func, on_done, on_output, on_prompt, on_command, *args, **kwargs):
+    def __init__(self, srv, func, on_done, on_output, on_prompt, on_command, on_ret, *args, **kwargs):
         super(HgCommandThread, self).__init__()
         self.srv = srv
         self.func = func
@@ -96,6 +96,7 @@ class HgCommandThread(Thread):
         self.on_output = on_output
         self.on_prompt = on_prompt
         self.on_command = on_command
+        self.on_ret = on_ret
         self.args = args
         self.kwargs = kwargs
 
@@ -123,6 +124,14 @@ class HgCommandThread(Thread):
         if self.on_output:
             main_thread(self.on_output, output)
 
+    def _error(self, output):
+        self._output(output)
+        self._cbret(2)
+
+    def _cbret(self, ret):
+        if ret and self.on_ret:
+            main_thread(self.on_ret, ret)
+
     def run(self):
         if not self.srv:
             self._done()
@@ -135,7 +144,8 @@ class HgCommandThread(Thread):
                 main_thread(self.on_command, self.func)
             srv = self.srv.server
             srv.setcbout(self._output)
-            srv.setcberr(self._output)
+            srv.setcberr(self._error)
+            srv.setcbret(self._cbret)
             srv.setcbprompt(lambda size, x: self._prompt(x) + b'\n')
             try:
                 output = getattr(srv, self.func)(*self.args, **self.kwargs)
@@ -155,7 +165,14 @@ class HgCommandThread(Thread):
 class HgCommand(object):
 
     def _cbout(self, data):
-        self.panel(str(data, self.encoding))
+        o = str(data, self.encoding)
+        self.panel(o)
+        v = self.get_view()
+        if v:
+            v.set_status('HgCommandOutput', o.strip())
+
+    def _return_code(self, ret):
+        self.show_panel()
 
     def _on_input_done(self, answer):
         self.panel('{}\n'.format(answer))
@@ -172,11 +189,14 @@ class HgCommand(object):
     def _done(self, output, err):
         pass
 
-    def _command_done(self, *args, **kwargs):
+    def _command_done(self, output, err):
         v = self.get_view()
         if v:
             v.erase_status('HgCommand')
-        self.on_done(*args, **kwargs)
+            v.erase_status('HgCommandOutput')
+        if err:
+            self.show_panel()
+        self.on_done(output, err)
 
     def _command(self, func):
         if self.log_output:
@@ -200,6 +220,7 @@ class HgCommand(object):
             self._cbout if log_output else None,
             self._cbprompt,
             self._command,
+            self._return_code,
             *args,
             **kwargs
         )
@@ -220,6 +241,8 @@ class HgCommand(object):
         self.output_view.set_read_only(False)
         self._output_to_view(self.output_view, output, clear=clear, **kwargs)
         self.output_view.set_read_only(True)
+
+    def show_panel(self):
         self.get_window().run_command('show_panel', {'panel': 'output.hg'})
 
     def scratch(self, output, title=None, **kwargs):
@@ -339,7 +362,6 @@ class HgBranchStatusListener(sublime_plugin.EventListener):
 class HgIncomingCommand(HgWindowCommand):
 
     hg_command = 'incoming'
-    no_changes_text = 'No incoming'
     output_view_title = 'Hg: Incoming'
 
     def _done(self, data, err):
@@ -353,8 +375,6 @@ class HgIncomingCommand(HgWindowCommand):
                 output.append('')
             self.scratch('\n'.join(output), title=self.output_view_title)
             self.window.run_command('hide_panel', {'panel': 'output.hg'})
-        else:
-            self.panel(err if err else self.no_changes_text)
 
     def run(self):
         self.run_hg_function(self.hg_command)
@@ -363,7 +383,6 @@ class HgIncomingCommand(HgWindowCommand):
 class HgOutgoingCommand(HgIncomingCommand):
 
     hg_command = 'outgoing'
-    no_changes_text = 'No outgoing'
     output_view_title = 'Hg: Outgoing'
 
 

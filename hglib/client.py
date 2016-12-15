@@ -62,6 +62,7 @@ class hgclient(object):
         self._cbout = None
         self._cberr = None
         self._cbprompt = None
+        self._cbret = None
 
         if connect:
             self.open()
@@ -94,6 +95,9 @@ class hgclient(object):
         which already handle the prompt.
         """
         self._cbprompt = cbprompt
+
+    def setcbret(self, cbret):
+        self._cbret = cbret
 
     def setprotocoltrace(self, tracefn=None):
         """
@@ -239,6 +243,8 @@ class hgclient(object):
             inchannels[b('I')] = input
 
         ret = self.runcommand(args, inchannels, outchannels)
+        if self._cbret is not None:
+            self._cbret(ret)
         out, err = out.getvalue(), err.getvalue()
 
         if ret:
