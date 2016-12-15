@@ -352,8 +352,7 @@ class HgIncomingCommand(HgWindowCommand):
                 output.append(r[5])
                 output.append('')
             self.scratch('\n'.join(output), title=self.output_view_title)
-            self.window.destroy_output_panel('hg')
-            self.output_view = None
+            self.window.run_command('hide_panel', {'panel': 'output.hg'})
         else:
             self.panel(err if err else self.no_changes_text)
 
