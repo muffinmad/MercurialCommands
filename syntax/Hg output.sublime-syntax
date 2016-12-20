@@ -1,0 +1,8 @@
+%YAML 1.2
+---
+name: Hg output
+scope: text.plain
+contexts:
+  main:
+    - match: .*
+      scope: text.plain

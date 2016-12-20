@@ -229,6 +229,8 @@ class HgCommand(object):
     def _output_to_view(self, view, output, clear=False, syntax=None, **kwargs):
         if syntax:
             view.set_syntax_file(syntax)
+        else:
+            view.set_syntax_file('Packages/MercurialCommands/syntax/Hg output.sublime-syntax')
         args = {
             'output': output,
             'clear': clear
