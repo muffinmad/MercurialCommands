@@ -1,0 +1,8 @@
+%YAML 1.2
+---
+name: Hg Commit Message
+scope: text.hg-commit
+contexts:
+  main:
+    - match: ^# .*$
+      scope: comment.hg-commit

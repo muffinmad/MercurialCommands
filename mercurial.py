@@ -172,7 +172,7 @@ class HgCommand(object):
             v.set_status('HgCommandOutput', o.strip())
 
     def _return_code(self, ret):
-        self.show_panel()
+        self.return_code = ret
 
     def _on_input_done(self, answer):
         self.panel('{}\n'.format(answer))
@@ -194,18 +194,17 @@ class HgCommand(object):
         if v:
             v.erase_status('HgCommand')
             v.erase_status('HgCommandOutput')
-        if err:
+        if err or self.return_code:
             self.show_panel()
         self.on_done(output, err)
 
     def _command(self, func):
-        if self.log_output:
-            self.panel('', clear=True)
+        self.panel('', clear=True)
         v = self.get_view()
         if v:
             v.set_status('HgCommand', 'Hg: ' + func)
 
-    def run_hg_function(self, func, on_done=None, log_output=True, *args, **kwargs):
+    def run_hg_function(self, func, on_done=None, log_output=True, on_ret=None, *args, **kwargs):
         self.srv = self.get_server()
         if not self.srv:
             self._done(None, None)
@@ -213,6 +212,7 @@ class HgCommand(object):
         self.encoding = self.srv.server.encoding.decode()
         self.log_output = log_output
         self.on_done = on_done or self._done
+        self.return_code = 0
         self.active_hg_command = HgCommandThread(
             self.srv,
             func,
@@ -220,7 +220,7 @@ class HgCommand(object):
             self._cbout if log_output else None,
             self._cbprompt,
             self._command,
-            self._return_code,
+            on_ret or self._return_code,
             *args,
             **kwargs
         )
@@ -322,6 +322,7 @@ class HgBranchStatusCommand(HgTextCommand):
         if not output:
             if err:
                 self.panel(err)
+                self.show_panel()
             self.view.erase_status('HgState')
             return
         self.srv.summary = {
@@ -437,6 +438,7 @@ class HgUpdateBranchCommand(HgWindowCommand):
             )
         else:
             self.panel(err if err else 'No branches')
+            self.show_panel()
 
     def select_done(self, idx):
         if idx > -1:
@@ -447,6 +449,7 @@ class HgUpdateBranchCommand(HgWindowCommand):
             self.current_branch = str(data, self.encoding)
         else:
             self.panel(err if err else 'No current branch')
+            self.show_panel()
             self.current_branch = None
         self.run_hg_function('branches', log_output=False, closed=self.closed)
 
@@ -490,6 +493,7 @@ class HgMergeBranchCommand(HgWindowCommand):
             )
         else:
             self.panel(err if err else 'No branches')
+            self.show_panel()
 
     def select_done(self, idx):
         if idx > -1:
@@ -522,6 +526,7 @@ class HgDiffCommand(HgWindowCommand):
             self.scratch(str(data, self.encoding), title='Hg: Diff', syntax='Packages/Diff/Diff.tmLanguage')
         else:
             self.panel(err if err else 'No changes')
+            self.show_panel()
 
     def run(self):
         self.run_hg_function('diff', log_output=False)
@@ -588,6 +593,7 @@ class HgCommitCommand(HgWindowCommand):
     def _on_status_done(self, data, err):
         if not data and not self.close_branch:
             self.panel(err if err else 'No changes')
+            self.show_panel()
             return
 
         output = [self.message or '']
@@ -597,20 +603,25 @@ class HgCommitCommand(HgWindowCommand):
             '# Empty message aborts the commit.',
             '# Close this window to accept your message.'
         ])
-        output.append('#')
-        output.append('# Files to commit:')
-        for r in data:
-            r = list(map(lambda x: str(x, self.encoding) if type(x) == bytes else x, r))
-            output.append('#\t{}\t{}'.format(r[0], r[1]))
+        if data:
+            output.append('')
+            output.append('Files to commit:')
+            for r in data:
+                r = list(map(lambda x: str(x, self.encoding) if type(x) == bytes else x, r))
+                output.append('\t{}\t{}'.format(r[0], r[1]))
 
         commit_history = self.srv.commit_history
         if commit_history:
-            output.append('#')
-            output.append('# Commit messages history:')
-            output.append('#')
+            output.append('')
+            output.append('Commit messages history:')
+            output.append('')
             for c in commit_history:
-                output.append('# {}'.format(c))
-        v = self.scratch('\n'.join(output), title='Hg: Commit close branch' if self.close_branch else 'Hg: Commit')
+                output.append('{}'.format(c))
+        v = self.scratch(
+            '\n'.join(output),
+            title='Hg: Commit close branch' if self.close_branch else 'Hg: Commit',
+            syntax='Packages/MercurialCommands/syntax/Hg Commit Message.sublime-syntax'
+        )
         v.set_read_only(False)
         HgCommitCommand.active_message = self
 
@@ -623,6 +634,7 @@ class HgCommitCommand(HgWindowCommand):
         message = message.split('\n# ----------')[0].strip()
         if not message:
             self.panel('No commit message', clear=True)
+            self.show_panel()
             return
         self.srv.add_commit_message(message)
         self.run_hg_function('commit', message=message.encode(self.encoding), closebranch=self.close_branch)
