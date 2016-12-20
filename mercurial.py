@@ -199,7 +199,8 @@ class HgCommand(object):
         self.on_done(output, err)
 
     def _command(self, func):
-        self.panel('', clear=True)
+        if self.log_output:
+            self.panel('', clear=True)
         v = self.get_view()
         if v:
             v.set_status('HgCommand', 'Hg: ' + func)
@@ -471,6 +472,8 @@ class HgMergeCommand(HgWindowCommand):
 
     def _done(self, data, err):
         self.reset_summary()
+        if self.return_code:
+            return
         message = 'merged'
         if self.rev:
             message += ' ' + self.rev
