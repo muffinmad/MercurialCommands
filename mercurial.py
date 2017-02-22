@@ -295,10 +295,12 @@ class HgTextCommand(HgCommand, sublime_plugin.TextCommand):
         if self.view.settings().get('is_widget'):
             return None
         fn = self.view.file_name()
-        if not fn:
-            return None
-        d = hg_root(os.path.realpath(os.path.dirname(fn)))
-
+        if fn:
+            d = hg_root(os.path.realpath(os.path.dirname(fn)))
+        else:
+            d = self.get_window().extract_variables().get('folder')
+            if not d or not is_hg_root(d):
+                return None
         if d:
             return _get_server(d)
         return None
@@ -473,6 +475,7 @@ class HgMergeCommand(HgWindowCommand):
     def _done(self, data, err):
         self.reset_summary()
         if self.return_code:
+            self.panel('RETURN CODE: %s' % self.return_code)
             return
         message = 'merged'
         if self.rev:
