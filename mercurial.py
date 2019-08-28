@@ -298,7 +298,8 @@ class HgTextCommand(HgCommand, sublime_plugin.TextCommand):
         if fn:
             d = hg_root(os.path.realpath(os.path.dirname(fn)))
         else:
-            d = self.get_window().extract_variables().get('folder')
+            v = self.get_window().extract_variables()
+            d = v.get('folder', v.get('file_path'))
             if not d or not is_hg_root(d):
                 return None
         if d:
@@ -315,7 +316,8 @@ class HgWindowCommand(HgCommand, sublime_plugin.WindowCommand):
         return self.window.active_view()
 
     def get_server(self):
-        d = self.window.extract_variables().get('folder')
+        v = self.window.extract_variables()
+        d = v.get('folder', v.get('file_path'))
         if d and is_hg_root(d):
             return _get_server(d)
         return None
